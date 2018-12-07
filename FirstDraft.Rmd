@@ -1,0 +1,133 @@
+---
+title: 'First Draft Visualization Project'
+author: 'Hernan Figueroa - Yufei Wu'
+output: html_document
+---
+
+
+### Goal
+
+The goal of this project is to perform an exploratory data analysis / create visualizations with data of your choosing in order to gain preliminary insights on questions of interest to you.
+
+
+### Topics
+
+The topic you choose is open-ended... choose something that you are intereted in and genuinely curious about! Think of some questions that you don't know the answer to. Next look for data that might help you answer those questions.  
+
+### Data
+
+The data can be pulled from multiple sources; it does not need to be a single dataset. Be sure to get data from the original source. For example, if you wish to work with data collected and distributed by the [Centers for Disease Control](https://www.cdc.gov/DataStatistics/){target="_blank"}, that is where you should go to access the data, not a third party that has posted the data. Avoid overused datasets (think `Titanic`) as well as those used in Kaggle (or similar) competitions. 
+
+A few examples are:
+
+- [NYC Open Data](https://opendata.cityofnewyork.us/){target="_blank"}
+- [US Bureau of Labor Statistics](https://www.bls.gov/){target="_blank"}
+
+### Code
+
+All of your code should be stored on GitHub. In your report, include a link to the repo, as well as links to specific files as relevant. The static visualizations should be done in R, but other pieces, such as data importation and cleaning do not. 
+
+### Analysis
+
+You have a lot of freedom to choose what to do, as long as you restrict yourselves to exploratory techniques (rather than modeling / prediction approaches). In addition, your analysis must be clearly documented and reproducible.
+
+
+
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE,
+                      message = FALSE,
+                      fig.width = 10)
+```
+```{r libraries, echo=FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+```
+Our project explores energy consumption and energy prices in different areas of New York State. For question 3 in Homework 4, I decided to choose the consumption as my variable.
+
+Data was obtained from NYISO:
+http://www.nyiso.com/public/markets_operations/market_data/custom_report/index.jsp?report=rt_actual_load
+
+
+### **V1 - Monthly Average Consumption in NYC in 2018**
+Higher in the summer months due to AC usage. 
+```{r 1v1}
+NYCLoad_2018_df <- read.csv('data/2018_NYC_OASIS_Real_Time_Dispatch_Actual_Load.csv', 
+                          colClasses =c("character",
+                                        rep("NULL",2),
+                                        "character"),
+                          stringsAsFactors = FALSE)
+
+colnames(NYCLoad_2018_df) <- c("Time","Load")
+NYCLoad_2018_df$Datetime <- strptime(NYCLoad_2018_df$Time, "%Y/%m/%d %H:%M:%S")
+NYCLoad_2018_df$Month <- as.factor(months.POSIXt(NYCLoad_2018_df$Datetime))
+NYCLoad_2018_df$Load <- as.numeric(NYCLoad_2018_df$Load)
+
+Complete_2018 <- na.omit(NYCLoad_2018_df[,c("Month","Load")])
+Complete_2018$Month <- factor(Complete_2018$Month, levels = month.name)
+
+Complete_mean_2018 <- Complete_2018 %>% group_by(Month) %>% summarise(AvgLoad = mean(Load))
+Complete_mean_2018$Month <- factor(Complete_mean_2018$Month, levels = month.name)
+gv1 <- ggplot(Complete_mean_2018, aes(Month,AvgLoad)) +
+  geom_col() +
+  ylab("")
+gv1
+
+```
+
+### **V2 - Histogram of Consumption in NYC in 2018**
+The summer months show some high values and more spreaded distributions. It may be more informative than V1
+```{r 1v2}
+gv2 <- ggplot(data = Complete_2018, aes(Load)) +
+  geom_histogram(fill = "red", binwidth = 100) +
+  facet_wrap(~Month)
+gv2
+```
+
+### **V3 - Is there seasonality?**
+Unfortunately the website does not allow more than 150,000 records, so each year has to be downloaded separately
+```{r 1v3}
+NYCLoad_2016_df <- read.csv('data/2016_NYC_OASIS_Real_Time_Dispatch_Actual_Load.csv', 
+                          colClasses =c("character",
+                                        rep("NULL",2),
+                                        "character"),
+                          stringsAsFactors = FALSE)
+
+colnames(NYCLoad_2016_df) <- c("Time","Load")
+NYCLoad_2016_df$Datetime <- strptime(NYCLoad_2016_df$Time, "%Y/%m/%d %H:%M:%S")
+NYCLoad_2016_df$Month <- months.POSIXt(NYCLoad_2016_df$Datetime)
+NYCLoad_2016_df$Load <- as.numeric(NYCLoad_2016_df$Load)
+Complete_2016 <- na.omit(NYCLoad_2016_df[,c("Month","Load")])
+Complete_2016$Month <- factor(Complete_2016$Month, levels = month.name)
+Complete_mean_2016 <- Complete_2016 %>% group_by(Month) %>% summarise(AvgLoad = mean(Load))
+Complete_mean_2016$Month <- factor(Complete_mean_2016$Month, levels = month.name)
+
+NYCLoad_2017_df <- read.csv('data/2017_NYC_OASIS_Real_Time_Dispatch_Actual_Load.csv', 
+                          colClasses =c("character",
+                                        rep("NULL",2),
+                                        "character"),
+                          stringsAsFactors = FALSE)
+
+colnames(NYCLoad_2017_df) <- c("Time","Load")
+NYCLoad_2017_df$Datetime <- strptime(NYCLoad_2017_df$Time, "%Y/%m/%d %H:%M:%S")
+NYCLoad_2017_df$Month <- months.POSIXt(NYCLoad_2017_df$Datetime)
+NYCLoad_2017_df$Load <- as.numeric(NYCLoad_2017_df$Load)
+Complete_2017 <- na.omit(NYCLoad_2017_df[,c("Month","Load")])
+Complete_2017$Month <- factor(Complete_2017$Month, levels = month.name)
+Complete_mean_2017 <- Complete_2017 %>% group_by(Month) %>% summarise(AvgLoad = mean(Load))
+Complete_mean_2017$Month <- factor(Complete_mean_2017$Month, levels = month.name)
+
+Complete_mean_2016$Year <- "2016"
+Complete_mean_2017$Year <- "2017"
+Complete_mean_2018$Year <- "2018"
+Complete_df <- rbind(Complete_mean_2016,Complete_mean_2017,Complete_mean_2018)
+Complete_df$Date <- as.Date(paste("01",Complete_df$Month,Complete_df$Year),format = "%d %B %Y")
+gv3 <- ggplot(Complete_df, aes(Date, AvgLoad, color = Year)) + geom_line() +
+    ggtitle("Average Electricity Consumption in NYC") +
+    labs (x = "", y = "MWh") +
+    theme_grey(16) +
+    theme(legend.title = element_blank())
+gv3
+```
