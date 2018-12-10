@@ -71,11 +71,10 @@ df_per_hour_week_month <-df_per_hour %>%
 ```
 ## Introduction
 
-Our project explores electricity consumption and electricity prices in different areas of New York City. We start exploring seasonality at the monthly and then weekly levels. We then compare prices vs consumption. The electric grid system in New York state is complex and the prices are not only dependend on consumption in New York City but also on prices from surrounding areas.
+Our project explores electricity consumption and electricity prices in different areas of New York City. 
+We are interested in finding out the patterns and trends in electricity consumption in different time periods and durations, such as seasonally, monthly, weekly, and hourly. 
+The electric grid system in New York state is complex and the prices are not only dependend on consumption in New York City but also on prices from surrounding areas. Our team consists of two members, Hernan Figueroa and Yufei Wu. Hernan focuses on discovering trends and patterns in monthly consumptions, while Yufei focuses on weekly changes in electricity used.
 
-## Description of data
-
-*Describe how the data was collected, how you accessed it, and any other noteworthy features.*
 
 ## Main analysis (Exploratory Data Analysis)
 
@@ -146,7 +145,7 @@ We can see that there is a clear dip of electricity use after midnight and befor
 
 ## Executive Summary
 
-```{r, fig.width=8, fig.height=6, echo=FALSE}
+```{r, fig.width=8, fig.height=4, echo=FALSE}
 
 d1_1 <- ggplot(df_per_hour_week, aes(as.numeric(wday), per_dayofweek_load, color=Group)) +
   geom_line() +
@@ -155,14 +154,13 @@ d1_1 <- ggplot(df_per_hour_week, aes(as.numeric(wday), per_dayofweek_load, color
                      breaks=seq(1,7,1),
                      labels=c("Sunday", "Monday", "Tuesday","Wednesday", "Thursday", "Friday","Saturday")) +
   scale_y_continuous(name="Load (MWh)") +
-  labs(title = "Average Load Per Hour", color = "Year Group\n") +
-  theme_igray(16) + scale_colour_colorblind()
+  labs(title = "Average Load Per Hour Each Day of The Week", color = "Year Group\n") +
+  theme_igray(14) + scale_colour_colorblind()
 
 d1_1
 ```
 
-As we conclude from the graph above, the electricity consumption 
-
+As we conclude from the graph above, there is a clear pattern in the electricity consumptions for different days out of a week, generally for all four years of data that we have measured. The pattern states that during the weekend days, electricity consumption is significantly lowered comparing to the weekdays. And during the weekdays, the amount of electricity used is visibly increased and remained around the same level for every weekday. Now that we observed the trend in electricity consumed among different days of the week regardless the seasonal changes, we have to validate that such trend also exists when we take seasonal differences in consideration as well. 
 
 ```{r, fig.width=8, fig.height=6, echo=FALSE}
 d2_1 <- ggplot(data = df_per_hour_week_month, 
@@ -173,8 +171,10 @@ d2_1 <- ggplot(data = df_per_hour_week_month,
                      breaks=seq(1,7,1),
                      labels=c("S", "M", "T", "W", "T", "F", "S")) +
   scale_y_continuous(name="Load (MWh)") + 
-  labs(title = "Average Load Per Hour", color = "Year Group\n") +
-  theme_igray(16) + scale_colour_colorblind()
+  labs(title = "Average Load Per Hour Each Day of The Week for Different Month", color = "Year Group\n") +
+  theme_igray(14) + scale_colour_colorblind()
 
 d2_1
 ```
+
+Here we plot the average load dispatch per hour for each day of the week for every month so that we can observe whether the trend stated above still occurs. We can easily observe that the general trend in every month is that the electricity consumption appears to be lower during the weekends and higher during the weekdays. We can also conclude from the graph above that during summer and winter, more energy is consumed. What's more, during the summer, a significantly more energy appears to be utilized even in comparison to the winter time. It is worth considering that an advanced planning for allocating facility and energy right before the summer starts every year. 
