@@ -138,10 +138,10 @@ dfp <- rbind(dfp2015, dfp2016, dfp2017, dfp2018)
 A time series plot can help us see that the data quality is good.
 
 ```{r initial_plot_load}
-gvl0 <- ggplot(dfl, aes(Time_Stamp, Actual_Load)) +
+gvl0 <- ggplot(dfl2018, aes(Time_Stamp, Actual_Load)) +
   geom_line() +
   geom_smooth(method = "loess", span = .5, se = FALSE) +
-  ggtitle("Initial Visualization of Load time series From 2014/11/1 to 2018/10/31") +
+  ggtitle("Initial Visualization of Load time series From 2017/11/1 to 2018/10/31") +
   xlab("Date") +
   ylab("Load (MWh)")
 #+
@@ -149,10 +149,10 @@ gvl0 <- ggplot(dfl, aes(Time_Stamp, Actual_Load)) +
 gvl0
 ```
 ```{r initial_plot_price}
-gvp0 <- ggplot(dfp, aes(Time_Stamp, Actual_Price)) +
+gvp0 <- ggplot(dfp2018, aes(Time_Stamp, Actual_Price)) +
   geom_line() +
   geom_smooth(method = "loess", span = .5, se = FALSE) +
-  ggtitle("Initial Visualization of Price time series From 2014/11/1 to 2018/10/31") +
+  ggtitle("Initial Visualization of Price time series From 2017/11/1 to 2018/10/31") +
   xlab("Date") +
   ylab("Load (MWh)")
 #+
