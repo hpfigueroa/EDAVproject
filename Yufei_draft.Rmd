@@ -1,0 +1,180 @@
+```{r include=FALSE}
+library(tidyverse)
+library(lubridate)
+library(ggthemes)
+
+```
+
+
+
+```{r initiate, include=FALSE}
+dfl2018 <- read_csv("./data/OASIS_Real_Time_Dispatch_Actual_Load_2017-2018.csv", na=c("NA"))
+
+dfl2017 <- read_csv("./data/OASIS_Real_Time_Dispatch_Actual_Load_2016-2017.csv", na=c("NA"))
+
+dfl2016 <- read_csv("./data/OASIS_Real_Time_Dispatch_Actual_Load_2015-2016.csv", na=c("NA"))
+
+dfl2015 <- read_csv("./data/OASIS_Real_Time_Dispatch_Actual_Load_2014-2015.csv", na=c("NA"))
+
+dfl2018$group <- as.factor(2018)
+dfl2017$group <- as.factor(2017)
+dfl2016$group <- as.factor(2016)
+dfl2015$group <- as.factor(2015)
+
+df <- rbind(dfl2015, dfl2016, dfl2017, dfl2018)
+df <- df[, c(1, 4, 5)]
+names(df) <- c("Time_Stamp", "Actual_Load", "Group")
+
+df <- df %>%
+  filter(!is.na(Actual_Load)) %>%
+  mutate(date = as.Date(Time_Stamp, format="%Y/%m/%d %H:%M:%S"), wday=wday(date))
+
+df$wday <- factor(df$wday)
+levels(df$wday) <- c("Sunday", "Monday", "Tuesday",
+                      "Wednesday", "Thursday", "Friday",
+                      "Saturday")
+
+df$Hour <- as.factor(sub("^.*([0-9]{2}):([0-9]{2}):([0-9]{2})$", "\\1",
+                           as.character(df$Time_Stamp)))
+df$Month <- as.factor(sub("^([0-9]{4})/([0-9]{2})/(.*)$", "\\2",
+                           as.character(df$Time_Stamp)))
+levels(df$Month) <- month.name[c(11:12,1:10)]
+df$Day <- as.factor(sub("^([0-9]{4})/([0-9]{2})/([0-9]{2}) (.*)$", "\\3",
+                           as.character(df$Time_Stamp)))
+
+df_per_hour <- df %>%
+  group_by(date, Month, wday, Hour, Group) %>%
+  summarize(per_hour_load = mean(Actual_Load))
+
+df_per_hour_2018 <- df_per_hour %>% filter(Group==2018)
+df_per_hour_day_2018 <- df_per_hour_2018 %>%
+    group_by(date) %>%
+    summarize(per_day_load=mean(per_hour_load))
+
+df_per_hour_week_2018 <- df_per_hour_2018 %>%
+    group_by(wday) %>%
+    summarize(per_dayofweek_load=mean(per_hour_load))
+
+# for all years
+df_per_hour_week <- df_per_hour%>%
+    group_by(Group, wday) %>%
+    summarize(per_dayofweek_load=mean(per_hour_load))
+
+df_per_hour_week_month_2018 <-df_per_hour_2018 %>% 
+  group_by(Month, wday) %>%
+  summarize( per_dayofweek_month_load= mean(per_hour_load))
+
+# for all years
+df_per_hour_week_month <-df_per_hour %>% 
+  group_by(Group, Month, wday) %>%
+  summarize( per_dayofweek_month_load= mean(per_hour_load))
+```
+## Introduction
+
+Our project explores electricity consumption and electricity prices in different areas of New York City. We start exploring seasonality at the monthly and then weekly levels. We then compare prices vs consumption. The electric grid system in New York state is complex and the prices are not only dependend on consumption in New York City but also on prices from surrounding areas.
+
+## Description of data
+
+*Describe how the data was collected, how you accessed it, and any other noteworthy features.*
+
+## Main analysis (Exploratory Data Analysis)
+
+```{r}
+
+d4 <- ggplot(df_per_hour_day_2018, aes(date, per_day_load)) +
+  geom_line() +
+  geom_smooth(method = "loess", span = .5, se = FALSE) +
+  ggtitle("Average Load Per Hour Each Day From 2017/11/1 to 2018/10/30") +
+  xlab("Date") +
+  ylab("Average Load Per Hour (MWPH)") +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %y")
+
+d4
+```
+
+
+As we can observe above, there are two peaks of electricity usage throughout a year. We can conclude from the dates of the year that electricity use surged in summer and also high in winter but not as high as summer. There are conspicuous patterns within smaller periods of time for us to explore.
+
+```{r}
+
+d1_1 <- ggplot(df_per_hour_week, aes(as.numeric(wday), per_dayofweek_load, color=Group)) +
+  geom_line() +
+  ggtitle("Average Load Per Hour On Each Day Of the Week") +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("Sunday", "Monday", "Tuesday","Wednesday", "Thursday", "Friday","Saturday")) +
+  scale_y_continuous(name="Load (MWh)") +
+  labs(title = "Average Load Per Hour", color = "Year Group\n") +
+  theme_igray() + scale_colour_colorblind()
+
+d1_1
+
+
+d2_1 <- ggplot(data = df_per_hour_week_month, 
+             aes(as.numeric(wday), per_dayofweek_month_load, color=Group)) +
+  geom_line()+
+  facet_wrap(~Month) +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("S", "M", "T", "W", "T", "F", "S")) +
+  scale_y_continuous(name="Load (MWh)") + 
+  labs(title = "Average Load Per Hour", color = "Year Group\n") +
+  theme_igray() + scale_colour_colorblind()
+
+d2_1
+```
+
+```{r}
+dflh_final <- df_per_hour %>% 
+  group_by(Group, Hour) %>% 
+  summarize(hour_average = mean(per_hour_load))
+
+d3 <- ggplot(dflh_final, aes(as.numeric(Hour), hour_average, color=Group)) + 
+  geom_line()  +
+  scale_x_continuous(name="Hour of The Day", 
+                     minor_breaks = seq(1, 24, 1),
+                     breaks=seq(1,24,1),
+                     labels=seq(0,23,1)) +
+  scale_y_continuous(name="Load (MWh)") +
+  labs(title = "Average Load Per Hour", color = "Year Group\n") +
+  theme_igray() + scale_colour_colorblind()
+
+d3
+```
+
+We can see that there is a clear dip of electricity use after midnight and before working hour each day. Now it is interesting to find out the difference of average load per hour on weekdays and on weekends.
+
+## Executive Summary
+
+```{r, fig.width=8, fig.height=6, echo=FALSE}
+
+d1_1 <- ggplot(df_per_hour_week, aes(as.numeric(wday), per_dayofweek_load, color=Group)) +
+  geom_line() +
+  ggtitle("Average Load Per Hour On Each Day Of the Week") +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("Sunday", "Monday", "Tuesday","Wednesday", "Thursday", "Friday","Saturday")) +
+  scale_y_continuous(name="Load (MWh)") +
+  labs(title = "Average Load Per Hour", color = "Year Group\n") +
+  theme_igray(16) + scale_colour_colorblind()
+
+d1_1
+```
+
+As we conclude from the graph above, the electricity consumption 
+
+
+```{r, fig.width=8, fig.height=6, echo=FALSE}
+d2_1 <- ggplot(data = df_per_hour_week_month, 
+             aes(as.numeric(wday), per_dayofweek_month_load, color=Group)) +
+  geom_line()+
+  facet_wrap(~Month) +
+  scale_x_continuous(name="\nDate of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("S", "M", "T", "W", "T", "F", "S")) +
+  scale_y_continuous(name="Load (MWh)") + 
+  labs(title = "Average Load Per Hour", color = "Year Group\n") +
+  theme_igray(16) + scale_colour_colorblind()
+
+d2_1
+```
