@@ -129,40 +129,152 @@ dfp2018 <- read.NYISO.Price("./data/NYC_OASIS_Real_Time_Dispatch_Zonal_LBMP_2017
 dfp2017 <- read.NYISO.Price("./data/NYC_OASIS_Real_Time_Dispatch_Zonal_LBMP_2016-2017.csv")
 dfp2016 <- read.NYISO.Price("./data/NYC_OASIS_Real_Time_Dispatch_Zonal_LBMP_2015-2016.csv")
 dfp2015 <- read.NYISO.Price("./data/NYC_OASIS_Real_Time_Dispatch_Zonal_LBMP_2014-2015.csv")
-dfl <- rbind(dfl2015, dfl2016, dfl2017, dfl2018)
-dfp <- rbind(dfp2015, dfp2016, dfp2017, dfp2018)
-
-
 ```  
 
 A time series plot can help us see that the data quality is good.
 
-```{r initial_plot_load}
+```{r initial_plot_load, eval=TRUE}
 gvl0 <- ggplot(dfl2018, aes(Time_Stamp, Actual_Load)) +
   geom_line() +
-  geom_smooth(method = "loess", span = .5, se = FALSE) +
+  geom_smooth(method = "loess", span = .3, se = FALSE) +
   ggtitle("Initial Visualization of Load time series From 2017/11/1 to 2018/10/31") +
   xlab("Date") +
-  ylab("Load (MWh)")
-#+
-#  scale_x_date(date_breaks = "1 month", date_labels = "%b %y")
+  ylab("Load (MWh)") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 gvl0
 ```
-```{r initial_plot_price}
+```{r initial_plot_price, eval=TRUE}
 gvp0 <- ggplot(dfp2018, aes(Time_Stamp, Actual_Price)) +
   geom_line() +
-  geom_smooth(method = "loess", span = .5, se = FALSE) +
+  geom_smooth(method = "loess", span = .3, se = FALSE) +
   ggtitle("Initial Visualization of Price time series From 2017/11/1 to 2018/10/31") +
   xlab("Date") +
-  ylab("Load (MWh)")
-#+
-#  scale_x_date(date_breaks = "1 month", date_labels = "%b %y")
+  ylab("Price per MWh ($)") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
 gvp0
 ```
 
-### **V1 - Monthly Average Consumption in NYC in 2018**
-After exploring the datasets, we only read the time and load column. We can see that most data falls within the expected time stamps.
-reading the dataset, we change the column Higher in the summer months due to AC usage. 
+
+Plotting the time series at 5 min resolution is time consuming and shows too much variability, particularly in the price with large negative peaks. An hourly and daily resolution is still informative and makes all calculations less computing intensive. We create hourly, daily and monthly aggregates of the values by taking the mean of all values within the desired period. 
+```{R hourly_average}
+dfp2018$Group <- dfl2018$Group <- as.factor(2018)
+dfp2017$Group <- dfl2017$Group <- as.factor(2017)
+dfp2016$Group <- dfl2016$Group <- as.factor(2016)
+dfp2015$Group <- dfl2015$Group <- as.factor(2015)
+dfl <- rbind(dfl2015, dfl2016, dfl2017, dfl2018)
+dfp <- rbind(dfp2015, dfp2016, dfp2017, dfp2018)
+dfl$Hour <- as.factor(hour(dfl$Time_Stamp))
+dfl$Date <- as.Date(dfl$Time_Stamp)
+dfl$wday <- as.factor(wday(dfl$Time_Stamp))
+levels(dfl$wday) <- c("Sunday", "Monday", "Tuesday",
+                      "Wednesday", "Thursday", "Friday",
+                      "Saturday")
+dfl$Month <- as.factor(month(dfl$Time_Stamp))
+levels(dfl$Month) <- month.abb
+
+dfl_per_hour <- dfl %>%
+  group_by(Date, Hour, wday, Month, YMonth, Group) %>%
+  summarize(per_hour_load = mean(Actual_Load))
+
+dfl_per_hour_2018 <- dfl_per_hour %>% filter(Group==2018)
+
+dfl_per_hour_day <- dfl_per_hour %>%
+    group_by(Group,Date) %>%
+    summarize(per_day_load=mean(per_hour_load))
+
+dfl_per_hour_week <- dfl_per_hour %>%
+    group_by(Group,wday) %>%
+    summarize(per_dayofweek_load=mean(per_hour_load))
+
+# for all years
+dfl_per_hour_week_month <-dfl_per_hour %>% 
+  group_by(Group, Month, wday) %>%
+  summarize(per_dayofweek_month_load= mean(per_hour_load))
+```
+### Main analysis (Exploratory Data Analysis)
+
+#### Load distributions
+We see that there is a seasonality in our data. Let's look at the histograms to understand the distribution of the load for each month.
+```{r 1v2}
+gv2 <- ggplot(data = dfl2018, aes(Actual_Load)) +
+  geom_histogram(fill = "red", binwidth = 100) +
+  facet_wrap(~YMonth)
+gv2
+```
+
+The summer months show more spreaded distributions with long tails indicating high peaks of demand. It is interesting to see that the most frequent loads in November, March and April are around the maximum peaks. Seems like there is certain equipment that has a maximum load that is used most of the time during those months, so the maximum load does not exceed those values. 
+
+#### Daily averages
+Let's now look at the daily averages of the load.   
+```{r}
+
+d4l <- ggplot(dfl_per_hour_day, aes(Date, per_day_load)) +
+  geom_line() +
+  geom_smooth(method = "loess", span = .1, se = FALSE) +
+  ggtitle("Average Load Per Day From 2014/11/1 to 2018/10/30") +
+  xlab("Date") +
+  ylab("Average Load Per Day (MWh)") +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %y") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+d4l
+```   
+As we can observe above, there are two peaks of electricity usage throughout a year. These peaks coincide with the hottest and coldest periods of the year. Consumption is expected to be high during the summer (Jun, Jul and Aug) due to the use of air conditioners. It is not obvious why electricity consumption is high during the coldest months during the winter (Jan, Feb). Usually heating uses natural gas instead of electricity, but fans and heat pumps are used to move the heated air around buildings.
+
+#### Load averages per day of the week
+There are conspicuous patterns within smaller periods of time for us to explore, such as what are the averages per day of the week.  
+```{r weekly}
+d1_1 <- ggplot(dfl_per_hour_week, aes(as.numeric(wday), per_dayofweek_load, color=Group)) +
+  geom_line() +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("Sunday", "Monday", "Tuesday","Wednesday",
+                              "Thursday", "Friday","Saturday")) +
+  labs(title = "Average Load Per Day of the Week", color = "Year Group\n") +
+  scale_y_continuous(name="Load (MWh)") +
+  theme_igray() + scale_colour_colorblind()
+
+d1_1
+```   
+```{r weekly_month}
+d2_1 <- ggplot(data = dfl_per_hour_week_month, 
+             aes(as.numeric(wday), per_dayofweek_month_load, color=Group)) +
+  geom_line()+
+  facet_wrap(~Month) +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("S", "M", "T", "W", "T", "F", "S")) +
+  scale_y_continuous(name="Load (MWh)") + 
+  labs(title = "Average Load Per Day of the Week per month", color = "Year Group\n") +
+  theme_igray() + scale_colour_colorblind()
+d2_1
+```
+We conclude from the graph above that there is a clear pattern in the electricity consumptions for different days of a week. As expected, consumption is higher during the weekdays since NYC has a large proportion of offices and commercial buildings that are mostly active during the weekdays. People commute to NYC from surrounding areas, such as New Jersey and Westchester county and during the weekends (Saturday and Sunday) the load is reduced within the NYC limits. This pattern is seen for all months in four years of data that we have collected. It is also shwon that the amount of electricity consumtion is about the same for each weekday, except in September that sees low consumption on Mondays, potentially due to the Labor Day holiday. 
+
+We observed these trend in electricity consumed among different days of the week regardless of seasonal changes and year analyzed. 
+
+#### Hourly distribution for an average day
+
+```{r}
+dflh_final <- dfl_per_hour %>% 
+  group_by(Group, Hour) %>% 
+  summarize(hour_average = mean(per_hour_load))
+
+d3 <- ggplot(dflh_final, aes(as.numeric(Hour), hour_average, color=Group)) + 
+  geom_line()  +
+  scale_x_continuous(name="Hour of The Day", 
+                     minor_breaks = seq(1, 24, 1),
+                     breaks=seq(1,24,1),
+                     labels=seq(0,23,1)) +
+  scale_y_continuous(name="Load (MWh)") +
+  labs(title = "Average Load Per Hour", color = "Year Group\n") +
+  theme_igray() + scale_colour_colorblind()
+
+d3
+```
+We can see that there is a clear dip of electricity use after midnight and before working hour each day. Now it is interesting to find out the difference of average load per hour on weekdays and on weekends.
+
+#### Monthly Average Consumption in NYC in 2018
+After exploring the datasets, we wanted to check the total consumption per month. We use geom_col for better scaling. 
 ```{r 1v1}
 mean_monthly <- function(dflyear) {
   return(dflyear %>%
@@ -176,40 +288,38 @@ gv1 <- ggplot(mean_monthly(dfl2018), aes(YMonth,AvgLoad)) +
 gv1
 
 ```
+## Executive Summary
 
-### **V2 - Histogram of Consumption in NYC in 2018**
-The summer months show some high values and more spreaded distributions. It may be more informative than V1
-```{r 1v2}
-gv2 <- ggplot(data = dfl2018, aes(Actual_Load)) +
-  geom_histogram(fill = "red", binwidth = 100) +
-  facet_wrap(~YMonth)
-gv2
+```{r, fig.width=8, fig.height=4, echo=FALSE}
+
+d1_1 <- ggplot(dfl_per_hour_week, aes(as.numeric(wday), per_dayofweek_load, color=Group)) +
+  geom_line() +
+  ggtitle("Average Load Per Hour On Each Day Of the Week") +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("Sunday", "Monday", "Tuesday","Wednesday", "Thursday", "Friday","Saturday")) +
+  scale_y_continuous(name="Load (MWh)") +
+  labs(title = "Average Load Per Hour Each Day of The Week", color = "Year Group\n") +
+  theme_igray(14) + scale_colour_colorblind()
+
+d1_1
 ```
 
-### **Is there seasonality in electricity consumption?**
+As we conclude from the graph above, there is a clear pattern in the electricity consumptions for different days out of a week, generally for all four years of data that we have measured. The pattern states that during the weekend days, electricity consumption is significantly lowered comparing to the weekdays. And during the weekdays, the amount of electricity used is visibly increased and remained around the same level for every weekday. Now that we observed the trend in electricity consumed among different days of the week regardless the seasonal changes, we have to validate that such trend also exists when we take seasonal differences in consideration as well. 
 
-NOTE: The ISO website does not allow a bulk download of more than 150,000 records. Each year has to be downloaded separately
-```{r 1v3}
-Load_mean_2015 <- mean_monthly(dfl2015)
-Load_mean_2016 <- mean_monthly(dfl2016)
-Load_mean_2017 <- mean_monthly(dfl2017)
-Load_mean_2018 <- mean_monthly(dfl2018)
+```{r, fig.width=8, fig.height=6, echo=FALSE}
+d2_1 <- ggplot(data = dfl_per_hour_week_month, 
+             aes(as.numeric(wday), per_dayofweek_month_load, color=Group)) +
+  geom_line()+
+  facet_wrap(~Month) +
+  scale_x_continuous(name="\nDate of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("S", "M", "T", "W", "T", "F", "S")) +
+  scale_y_continuous(name="Load (MWh)") + 
+  labs(title = "Average Load Per Hour Each Day of The Week for Different Month", color = "Year Group\n") +
+  theme_igray(14) + scale_colour_colorblind()
 
-levels(Load_mean_2015$YMonth) <- month.abb[c(11:12,1:10)]
-levels(Load_mean_2016$YMonth) <- month.abb[c(11:12,1:10)]
-levels(Load_mean_2017$YMonth) <- month.abb[c(11:12,1:10)]
-levels(Load_mean_2018$YMonth) <- month.abb[c(11:12,1:10)]
-
-Load_mean_2015$Year <- "2015"
-Load_mean_2016$Year <- "2016"
-Load_mean_2017$Year <- "2017"
-Load_mean_2018$Year <- "2018"
-Load_mean_df <- rbind(Load_mean_2015,Load_mean_2016,Load_mean_2017,Load_mean_2018)
-
-gv3 <- ggplot(Load_mean_df, aes(YMonth, AvgLoad, color=Year)) + geom_point(size=4) + 
-    ggtitle("Average Electricity Consumption in NYC") +
-    labs (x = "", y = "MWh") +
-    theme_grey(16) +
-    theme(legend.title = element_blank())
-gv3
+d2_1
 ```
+
+Here we plot the average load dispatch per hour for each day of the week for every month so that we can observe whether the trend stated above still occurs. We can easily observe that the general trend in every month is that the electricity consumption appears to be lower during the weekends and higher during the weekdays. We can also conclude from the graph above that during summer and winter, more energy is consumed. What's more, during the summer, a significantly more energy appears to be utilized even in comparison to the winter time. It is worth considering that an advanced planning for allocating facility and energy right before the summer starts every year. 
