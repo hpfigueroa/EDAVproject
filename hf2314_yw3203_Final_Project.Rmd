@@ -1,0 +1,398 @@
+---
+title: 'First Draft Visualization Project'
+author: 'Hernan Figueroa - Yufei Wu'
+output: html_document
+---
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE, 
+                      warning = FALSE,
+                      message = FALSE,
+                      fig.width = 10)
+```
+```{r libraries, echo=FALSE}
+library(knitr)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(ggthemes)
+```
+### Introduction
+Our project explores electricity consumption and electricity prices in different areas of New York City. We start exploring seasonality at the monthly and then weekly levels. We then compare prices vs consumption. The electric grid system in New York state is complex and the prices are not only dependend on consumption in New York City but also on prices from surrounding areas. 
+
+### Description of data
+
+The data were obtain from the [New York Independent System Operator (NYISO)](https://www.nyiso.com/):  
+- Load consumption data were obtained from a custom market report for real-time [Actual Load](https://www.nyiso.com/custom-reports?report=rt_actual_load)  
+- Price data was obtained from a custom market report for real-time [Local Market Price](https://www.nyiso.com/custom-reports?report=rt_lbmp_zonal)  
+
+NOTE: The ISO website does not allow a bulk download of more than 150,000 records. The dataset for each year has to be downloaded separately
+
+The data and these files are hosted in Github: [https://github.com/hpfigueroa/EDAVproject](https://github.com/hpfigueroa/EDAVproject).
+
+
+### Analysis of data quality
+
+The datasets are time series for consumption (Load) and price (LBMP). These values are supposed to be recorded every 5 minutes. First we look at the raw information from the files undestand the data.
+
+```{r rawLoad}
+filename <- 'data/NYC_OASIS_Real_Time_Dispatch_Actual_Load_2017-2018.csv'
+raw_load_df <- read.csv(filename, stringsAsFactors = FALSE)
+glimpse(raw_load_df)
+```
+```{r rawPrice}
+filename <- 'data/NYC_OASIS_Real_Time_Dispatch_Zonal_LBMP_2017-2018.csv'
+raw_price_df <- read.csv(filename, stringsAsFactors = FALSE)
+glimpse(raw_price_df)
+```
+Since we will focus on NYC data, we can drop the common variables Zone.Name and Zone.PTID from the data. From the price (LBMP) data, we only focus on the total price (`RTD.Zonal.LBMP`) and we can drop `RTD.Zonal.Losses`, `RTD.Zonal.Congestion` and `RTD.Zonal.Price.Version`.  We can convert `RTD.End.Time.Stamp` to `Time`. We should also make sure that `RTD.Actual.Load` and `RTD.Zonal.LBMP` are numeric values and label them as `Load` and `Price`. 
+
+If values are recorded every 5 minutes, we expect 105,120 data points per year (12 values per hour times 8760 hour per year). Both dataset contain 106,607 and 106,188 observation, indicating that some values may be repeated. We create a sequence of time values to review the quality of the values in the time series.  
+```{r ts_check}
+ts_expected = seq(from=as.POSIXct("2017/11/01 00:05:00"),
+                  to=as.POSIXct("2018/10/31 23:55:00"),
+                  by=300) #sequence every 5 minutes (300 seconds)
+
+raw_load_df$Time_Stamp <- as.POSIXct(raw_load_df$RTD.End.Time.Stamp, format="%Y/%m/%d %H:%M:%S")
+raw_load_df <- subset(raw_load_df, Time_Stamp %in% ts_expected)
+
+kable(x = data.frame(length(ts_expected), nrow(raw_load_df),
+            sum(duplicated(raw_load_df$RTD.End.Time.Stamp)),
+            length(unique(raw_load_df$Time_Stamp)),
+            sum(is.na(raw_load_df))),
+      col.names = c("Expected obs.", "Orig. obs.",
+                    "Duplicated obs.", "unique expected obs.",
+                    "NA observations"),
+      caption = "Load dataset - Number of expected observations vs original number of observations")
+
+raw_price_df$Time_Stamp <- as.POSIXct(raw_price_df$RTD.End.Time.Stamp, format="%Y/%m/%d %H:%M:%S")
+raw_price_df <- subset(raw_price_df, Time_Stamp %in% ts_expected)
+
+kable(x = data.frame(length(ts_expected), nrow(raw_price_df),
+            sum(duplicated(raw_price_df$RTD.End.Time.Stamp)),
+            length(unique(raw_price_df$Time_Stamp)),
+            sum(is.na(raw_price_df))),
+      col.names = c("Expected obs.", "Orig. obs.",
+                    "Duplicated obs.", "unique expected obs.",
+                    "NA observations"),
+      caption = "Price dataset - Number of expected observations vs original number of observations")
+```  
+
+The number of duplicated values is only 0.4% of the dataset and the number of NAs is very low; therefore, we choose to drop those values. Now that we understand the structure of the dataset, we will create a function to read the yearly files and only load the load and price information. 
+```{r functions}
+read.NYISO.Load <- function(filename){
+  NYCLoad_df <- read.csv(filename, 
+                        colClasses =c("character",
+                                      rep("NULL",2),
+                                      "character"),
+                        stringsAsFactors = FALSE,
+                        na=c("NA"))
+  colnames(NYCLoad_df) <- c("Time_Stamp","Actual_Load")
+  NYCLoad_df <- NYCLoad_df[1:(nrow(NYCLoad_df)-1),] #Last value belongs to next month
+  ts_expected = seq(from=as.POSIXct(NYCLoad_df$Time_Stamp[1]),
+                  to=as.POSIXct(NYCLoad_df$Time_Stamp[nrow(NYCLoad_df)]),
+                  by=300) #sequence every 5 minutes (300 seconds)
+  NYCLoad_df$Time_Stamp <- as.POSIXct(NYCLoad_df$Time_Stamp, format="%Y/%m/%d %H:%M:%S")
+  NYCLoad_df <- subset(NYCLoad_df, Time_Stamp %in% ts_expected)
+  NYCLoad_df <- subset(NYCLoad_df, !duplicated(NYCLoad_df$Time_Stamp))
+  NYCLoad_df$YMonth <- as.factor(format(NYCLoad_df$Time_Stamp,"%Y-%m"))
+  NYCLoad_df$Actual_Load <- as.numeric(NYCLoad_df$Actual_Load)
+  return(na.omit(NYCLoad_df))
+}
+read.NYISO.Price <- function(filename){
+  NYCPrice_df <- read.csv(filename, 
+                        colClasses =c("character",
+                                      rep("NULL",2),
+                                      "character",
+                                      rep("NULL",3)),
+                        stringsAsFactors = FALSE,
+                        na=c("NA"))
+  colnames(NYCPrice_df) <- c("Time_Stamp","Actual_Price")
+  NYCPrice_df <- NYCPrice_df[1:(nrow(NYCPrice_df)-1),] #Last value belongs to next month
+  ts_expected = seq(from=as.POSIXct(NYCPrice_df$Time_Stamp[1]),
+                  to=as.POSIXct(NYCPrice_df$Time_Stamp[nrow(NYCPrice_df)]),
+                  by=300) #sequence every 5 minutes (300 seconds)
+  NYCPrice_df$Time_Stamp <- as.POSIXct(NYCPrice_df$Time_Stamp, format="%Y/%m/%d %H:%M:%S")
+  NYCPrice_df <- subset(NYCPrice_df, Time_Stamp %in% ts_expected)
+  NYCPrice_df <- subset(NYCPrice_df, !duplicated(NYCPrice_df$Time_Stamp))
+  NYCPrice_df$YMonth <- as.factor(format(NYCPrice_df$Time_Stamp,"%Y-%m"))
+  NYCPrice_df$Actual_Price <- as.numeric(NYCPrice_df$Actual_Price)
+  return(na.omit(NYCPrice_df)) #We drop a few NA values
+}
+```   
+
+With those functions we can read the datasets
+```{r read_data}
+dfl2018 <- read.NYISO.Load("./data/NYC_OASIS_Real_Time_Dispatch_Actual_Load_2017-2018.csv")
+dfl2017 <- read.NYISO.Load("./data/NYC_OASIS_Real_Time_Dispatch_Actual_Load_2016-2017.csv")
+dfl2016 <- read.NYISO.Load("./data/NYC_OASIS_Real_Time_Dispatch_Actual_Load_2015-2016.csv")
+dfl2015 <- read.NYISO.Load("./data/NYC_OASIS_Real_Time_Dispatch_Actual_Load_2014-2015.csv")
+dfp2018 <- read.NYISO.Price("./data/NYC_OASIS_Real_Time_Dispatch_Zonal_LBMP_2017-2018.csv")
+dfp2017 <- read.NYISO.Price("./data/NYC_OASIS_Real_Time_Dispatch_Zonal_LBMP_2016-2017.csv")
+dfp2016 <- read.NYISO.Price("./data/NYC_OASIS_Real_Time_Dispatch_Zonal_LBMP_2015-2016.csv")
+dfp2015 <- read.NYISO.Price("./data/NYC_OASIS_Real_Time_Dispatch_Zonal_LBMP_2014-2015.csv")
+```  
+
+A time series plot can help us see that the data quality is good.
+
+```{r initial_plot_load, eval=TRUE}
+gvl0 <- ggplot(dfl2018, aes(Time_Stamp, Actual_Load)) +
+  geom_line() +
+  geom_smooth(method = "loess", span = .3, se = FALSE) +
+  ggtitle("Initial Visualization of Load time series From 2017/11/1 to 2018/10/31") +
+  xlab("Date") +
+  ylab("Load (MWh)") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+gvl0
+```
+```{r initial_plot_price, eval=TRUE}
+gvp0 <- ggplot(dfp2018, aes(Time_Stamp, Actual_Price)) +
+  geom_line() +
+  geom_smooth(method = "loess", span = .3, se = FALSE) +
+  ggtitle("Initial Visualization of Price time series From 2017/11/1 to 2018/10/31") +
+  xlab("Date") +
+  ylab("Price per MWh ($)") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+gvp0
+```
+
+
+Plotting the time series at 5 min resolution is time consuming and shows too much variability, particularly in the price with large negative peaks. An hourly and daily resolution is still informative and makes all calculations less computing intensive. We create hourly, daily and monthly aggregates of the values by taking the mean of all values within the desired period. 
+```{R hourly_average}
+dfp2018$Group <- dfl2018$Group <- as.factor(2018)
+dfp2017$Group <- dfl2017$Group <- as.factor(2017)
+dfp2016$Group <- dfl2016$Group <- as.factor(2016)
+dfp2015$Group <- dfl2015$Group <- as.factor(2015)
+
+add_time_columns <- function(df) {
+  df$Hour <- as.factor(hour(df$Time_Stamp))
+  df$Date <- as.Date(df$Time_Stamp)
+  df$wday <- as.factor(wday(df$Time_Stamp))
+  levels(df$wday) <- c("Sunday", "Monday", "Tuesday",
+                        "Wednesday", "Thursday", "Friday",
+                        "Saturday")
+  df$Month <- as.factor(month(df$Time_Stamp))
+  levels(df$Month) <- month.abb
+  return(df)
+}
+
+dfl <- add_time_columns(rbind(dfl2015, dfl2016, dfl2017, dfl2018))
+dfp <- add_time_columns(rbind(dfp2015, dfp2016, dfp2017, dfp2018))
+
+dfl_per_hour <- dfl %>%
+  group_by(Date, Hour, wday, Month, YMonth, Group) %>%
+  summarize(per_hour_load = mean(Actual_Load))
+
+dfp_per_hour <- dfp %>%
+  group_by(Date, Hour, wday, Month, YMonth, Group) %>%
+  summarize(per_hour_price = mean(Actual_Price))
+
+dfl_per_hour_2018 <- dfl_per_hour %>% filter(Group==2018)
+
+dfl_per_hour_day <- dfl_per_hour %>%
+    group_by(Group,Date) %>%
+    summarize(per_day_load=mean(per_hour_load))
+
+dfl_per_hour_week <- dfl_per_hour %>%
+    group_by(Group,wday) %>%
+    summarize(per_dayofweek_load=mean(per_hour_load))
+
+dfl_per_hour_week_month <-dfl_per_hour %>% 
+  group_by(Group, Month, wday) %>%
+  summarize(per_dayofweek_month_load= mean(per_hour_load))
+
+dfp_per_hour_week <- dfp_per_hour %>%
+    group_by(Group,wday) %>%
+    summarize(per_dayofweek_price=mean(per_hour_price))
+dfp_per_hour_week_month <-dfp_per_hour %>% 
+  group_by(Group, Month, wday) %>%
+  summarize(per_dayofweek_month_price= mean(per_hour_price))
+
+
+```
+### Main analysis (Exploratory Data Analysis)
+
+#### Load distributions
+We see that there is a seasonality in our data. Let's look at the histograms to understand the distribution of the load and prices for each month.
+```{r 1v2}
+gv2 <- ggplot(data = dfl2018, aes(Actual_Load)) +
+  geom_histogram(fill = "red", alpha=0.8, binwidth = 100) +
+  facet_wrap(~YMonth)
+gv2
+```
+The summer months show wider distributions with long tails indicating high peaks of load consumption. It is interesting to see that the most frequent loads in November, March and April are around the maximum peaks. It is possible that in milder months, we certain equipment is used constantly and since there is no additional consumption due to low or high temperatures, a maximum load is used most of the time during those months.
+
+```{r 1v3}
+gv2 <- ggplot(data = dfp2018, aes(Actual_Price)) +
+  geom_histogram(fill = "blue", alpha=0.8, breaks = seq(-25,300,5)) +
+  facet_wrap(~YMonth)
+gv2
+```
+The prices on the other hand have distribution concentrated around \$25-\$50 per MWh. However it is interesting to see that during the winter months there are higher prices, making the distributions wider in December and January.
+
+#### Daily averages
+Let's now look at the daily averages of the load.   
+```{r}
+d4l <- ggplot(dfl_per_hour_day, aes(Date, per_day_load)) +
+  geom_line() +
+  geom_smooth(method = "loess", span = .1, se = FALSE) +
+  ggtitle("Average Load Per Day From 2014/11/1 to 2018/10/30") +
+  xlab("Date") +
+  ylab("Average Load Per Day (MWh)") +
+  scale_x_date(date_breaks = "1 month", date_labels = "%b %y") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+d4l
+```   
+As we can observe above, there are two peaks of electricity usage throughout a year. These peaks coincide with the hottest and coldest periods of the year. Consumption is expected to be high during the summer (Jun, Jul and Aug) due to the use of air conditioners. It is not obvious why electricity consumption is high during the coldest months during the winter (Jan, Feb). Usually heating uses natural gas instead of electricity, but fans and heat pumps are used to move the heated air around buildings.
+
+#### Load averages per day of the week
+There are conspicuous patterns within smaller periods of time for us to explore, such as what are the averages per day of the week.  
+```{r weekly}
+d1_1 <- ggplot(dfl_per_hour_week, aes(as.numeric(wday), per_dayofweek_load, color=Group)) +
+  geom_line() +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("Sunday", "Monday", "Tuesday","Wednesday",
+                              "Thursday", "Friday","Saturday")) +
+  labs(title = "Average Load Per Day of the Week", color = "Year Group\n") +
+  scale_y_continuous(name="Load (MWh)") +
+  theme_igray() + scale_colour_colorblind()
+
+d1_1
+```   
+```{r weekly_month}
+d2_1 <- ggplot(data = dfl_per_hour_week_month, 
+             aes(as.numeric(wday), per_dayofweek_month_load, color=Group)) +
+  geom_line()+
+  facet_wrap(~Month) +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("S", "M", "T", "W", "T", "F", "S")) +
+  scale_y_continuous(name="Load (MWh)") + 
+  labs(title = "Average Load Per Day of the Week per month", color = "Year Group\n") +
+  theme_igray() + scale_colour_colorblind()
+d2_1
+```
+We conclude from the graph above that there is a clear pattern in the electricity consumptions for different days of a week. 
+
+We observed these trend in electricity consumed among different days of the week regardless of seasonal changes and year analyzed. 
+
+#### Hourly distribution for an average day
+
+```{r}
+dflh_final <- dfl_per_hour %>% 
+  group_by(Group, Hour) %>% 
+  summarize(hour_average = mean(per_hour_load))
+
+d3 <- ggplot(dflh_final, aes(as.numeric(Hour), hour_average, color=Group)) + 
+  geom_line()  +
+  scale_x_continuous(name="Hour of The Day", 
+                     minor_breaks = seq(1, 24, 1),
+                     breaks=seq(1,24,1),
+                     labels=seq(0,23,1)) +
+  scale_y_continuous(name="Load (MWh)") +
+  labs(title = "Average Load Per Hour", color = "Year Group\n") +
+  theme_igray() + scale_colour_colorblind()
+
+d3
+```
+We can see that there is a clear dip of electricity use after midnight and before working hour each day. Now it is interesting to find out the difference of average load per hour on weekdays and on weekends.
+
+#### Monthly Average Consumption in NYC in 2018
+After exploring the datasets, we wanted to check the total consumption per month. We use geom_col for better scaling. 
+```{r 1v1}
+mean_monthly <- function(dflyear) {
+  return(dflyear %>%
+         group_by(YMonth) %>%
+         summarise(AvgLoad = mean(Actual_Load))
+        )
+}
+gv1 <- ggplot(mean_monthly(dfl2018), aes(YMonth,AvgLoad)) +
+  geom_col() +
+  ylab("")
+gv1
+
+```
+
+
+## Executive Summary
+
+In our opinion, Weekly patterns line plots can summarize our main findings. 
+
+```{r, fig.height=5, echo=FALSE}
+
+d1_1 <- ggplot(dfl_per_hour_week, aes(as.numeric(wday), per_dayofweek_load, color=Group)) +
+  geom_line(size = 1) +
+  ggtitle("Average Load Per Hour On Each Day Of the Week") +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("Sunday", "Monday", "Tuesday","Wednesday", "Thursday", "Friday","Saturday")) +
+  scale_y_continuous(name="Load (MWh)") +
+  labs(title = "Average Load Per Hour Each Day of The Week", color = "Year Group\n") +
+  theme_igray(14) + scale_colour_colorblind()
+
+d1_1
+```
+
+We conclude from the graph above that there is a clear pattern in the electricity consumptions for different days in a week in New York City. Electricity consumption is higher during working weekdays since NYC has a large concentration of office and commercial buildings, which are mostly active from Monday through Fridays. Thousands of people commute to NYC from surrounding areas. This influx of people is reduced during the weekends (Saturday and Sunday) and therefore the load is reduced within the NYC limits. We also analyzed if this pattern is consistent throughout the year.
+
+```{r, fig.height=8, echo=FALSE}
+d2_1 <- ggplot(data = dfl_per_hour_week_month, 
+             aes(as.numeric(wday), per_dayofweek_month_load, color=Group)) +
+  geom_line()+
+  facet_wrap(~Month) +
+  scale_x_continuous(name="\nDate of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("S", "M", "T", "W", "T", "F", "S")) +
+  scale_y_continuous(name="Load (MWh)") + 
+  labs(title = "Average Load Per Hour Each Day of The Week for Different Month", color = "Year Group\n") +
+  theme_igray(14) + scale_colour_colorblind()
+
+d2_1
+```
+The weekly pattern is observed during all months in the four years of data that we collected. It is also shwon that the amount of electricity consumption is about the same for each weekday, except in September that sees low consumption on Mondays, potentially due to the Labor Day holiday. 
+This graph can also show us thath electricity consumption is highest during the summer months, particularly in July and August. Energy is used to cool office and residential buildings. April and November show the lowest consumption levels, but the weekly pattern is still noticeable. 
+
+After looking at these trends we asked ourselves if electricity prices would follow similar trends.
+
+```{r, fig.height=5, echo=FALSE}
+
+d1_2 <- ggplot(dfp_per_hour_week, aes(as.numeric(wday), per_dayofweek_price, color=Group)) +
+  geom_line(size = 1) +
+  ggtitle("Average Price Per Hour On Each Day Of the Week") +
+  scale_x_continuous(name="Date of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("Sunday", "Monday", "Tuesday","Wednesday", "Thursday", "Friday","Saturday")) +
+  scale_y_continuous(name="Price per MWh ($))") +
+  labs(title = "Average Price Per Hour Each Day of The Week", color = "Year Group\n") +
+  theme_igray(14) + scale_colour_colorblind()
+
+d1_2
+```
+
+Electricity prices show a less noticeable weekly trend. In reality electricity prices are not only influenced by electricity demand, but also by fuel prices and operating conditions of generating facilities in the surrounding areas. It is clear that 2015 and 2018 show higher prices then 2016 and 2017. We will now see if these patterns are followed every month. 
+
+```{r, fig.height=8, echo=FALSE}
+d2_2 <- ggplot(data = dfp_per_hour_week_month, 
+             aes(as.numeric(wday), per_dayofweek_month_price, color=Group)) +
+  geom_line()+
+  facet_wrap(~Month) +
+  scale_x_continuous(name="\nDate of The Week", 
+                     breaks=seq(1,7,1),
+                     labels=c("S", "M", "T", "W", "T", "F", "S")) +
+  scale_y_continuous(name="Price per MWh ($))") + 
+  labs(title = "Average Price Per Hour Each Day of The Week for Different Month", color = "Year Group\n") +
+  theme_igray(14) + scale_colour_colorblind()
+
+d2_2
+```
+The weekly patterns are not followed inmany months of the year. For example in June and May prices are higher during the weekend. In January 2018 the weekly pattern observed for loads is totally reversed. We can see that prices are less correlated to consumption as we initially thought. Prices are more influenced by fuel prices and by operating conditions of surrounding power plants. We learned that under extreme cold weather some generating plants present operating issues that require electric companies to purchase power from expensive sources. This is potentially what happend in January 2018 and February 2015. It is worth mentioning that electric companies conduct advanced planning for allocating generating capacity right before the summer starts every year, so prices during the summer are better managed than prices during the winter.
+
+### Conclusions
+Electricity consumption and electricity prices seem to be less correlated than expected. Prices can reach peaks in winter months while consumption reach peaks in summer months. Furthermore, in New York city, weekdays show high consumption than weekend, this is possibly due to the high concentration of businesses and offices in the city. 
+The New York Independent Operator provides data for various regions in New York State. This preliminary EDA does not analyze the loads and prices in surrounding areas of New York City. Also, prices maybe influenced by fuel prices. A dataset with fuel prices can enrich the analysis. 
+Also, consumption and prices are affected by weather patterns and this EDA did not include weather datasets. This project could lead to a forecasting project, in which a market participant is interested in forecasting electricity prices in advance to bid energy production or manage energy consumption. If this project leads to a forecasting project, weather and fuel prices datasets would be needed.
+In terms of the tools learned in class, we feel that ggplot is a powerful library with easy to use functions to create professional looking plots.Most time was spent in cleaning and organizing data with tidyverse tools to be able to use straight forward ggplot functions. 
+
+### Interactive component
+The interactive component is submitted in a zip file, since it is a standalone file with css and js files. We tried to upload it to [http://hpfigueroa.github.io](http://hpfigueroa.github.io/RAssignments/EDAVProject.html).
